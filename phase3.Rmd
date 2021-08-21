@@ -1,0 +1,143 @@
+---
+title: "BIST 5092 Phase III Project"
+output: html_notebook
+---
+```{r}
+library(dplyr)
+library(tidyr)
+```
+
+### import ADPA and ADSL datasets, select measurements at visit 6
+```{r}
+adpa <- read.csv("../data_phase 3/ADPA.csv")
+pasi6 <- adpa %>% filter(PARAMCD == "PASI", AVISIT == "VISIT 6")
+adsl <- read.csv("../data_phase 3/ADsl.csv")
+adae <- read_csv("../data_phase 3/ADAE.csv")
+```
+
+### perform logistic regression to assess the treatment effect on PASI75 adjusted by sex with the full dataset
+```{r}
+dat_full <- merge(adsl, pasi6, by = "SUBJID")
+summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat_full, family = binomial))
+```
+
+## MCAR
+### create functions to generate dataset with certain percent missing
+```{r}
+generate_missing <- function(data, percent){
+  id <- sample(1:nrow(data), round(nrow(data)*percent), replace = FALSE)
+  data_par1 <- data[id,]
+  data_par1$AVAL <- NA
+  data_par2 <- data[-id,]
+  data_final <- rbind(data_par1, data_par2) 
+  data_final$PCHGCA1N[which(is.na(data_final$AVAL))] <- NA
+  
+  return(data_final)
+}
+```
+
+### 1. generate dataset with 10% missing and perform logistic regression 
+```{r}
+set.seed(1234)
+pasi6_final1 <- generate_missing(pasi6, 0.1)
+dat1 <- merge(adsl, pasi6_final1, by = "SUBJID")
+summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat1, family = binomial))
+```
+
+### 2. Impute the missingness and reanalyze the data
+```{r}
+dat1_im <- dat1
+dat1_im$PCHGCA1N[which(is.na(dat1_im$AVAL))] <- 0
+summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat1_im, family = binomial))
+```
+
+
+### 3. repeat 1 & 2 with 20% missingness
+```{r}
+## with 20% missingness
+set.seed(1234)
+pasi6_final2 <- generate_missing(pasi6, 0.2)
+dat2 <- merge(adsl, pasi6_final2, by = "SUBJID")
+summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat2, family = binomial))
+
+## with 20% missingness imputed
+dat2_im <- dat2
+dat2_im$PCHGCA1N[which(is.na(dat2_im$AVAL))] <- 0
+summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat2_im, family = binomial))
+```
+
+### repeat 1 & 2 with 30% missingness
+```{r}
+## with 30% missingness
+set.seed(1234)
+pasi6_final3 <- generate_missing(pasi6, 0.3)
+dat3 <- merge(adsl, pasi6_final3, by = "SUBJID")
+summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat3, family = binomial))
+
+## with 30% missingness imputed
+dat3_im <- dat3
+dat3_im$PCHGCA1N[which(is.na(dat3_im$AVAL))] <- 0
+summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat3_im, family = binomial))
+```
+
+## MAR
+```{r}
+# select subject id, visit number, percent change from baseline at each visit
+# reshape the dataset into wide format
+pasi_inter <- pasi %>% 
+  select(SUBJID, AVISIT, PCHG) %>% 
+  spread(AVISIT, PCHG)
+
+# generate missing data conditioned on previous visits
+# in miss4, miss5 and miss6, 0 is missing, 1 is not missing
+set.seed(1234)
+for (i in 1:nrow(pasi_inter)){
+  if (pasi_inter$`VISIT 3`[i] < 10){
+    pasi_inter$miss4[i] <- rbinom(1, 1, 0.7)
+  } else{ pasi_inter$miss4[i] <- rbinom(1, 1, 0.95)}
+}
+
+for (i in 1:nrow(pasi_inter)){
+  if (pasi_inter$miss4[i] == 0){
+    pasi_inter$miss5[i] = 0
+  } else if (pasi_inter$`VISIT 4`[i] < 10){
+    pasi_inter$miss5[i] <- rbinom(1, 1, 0.7)
+  } else{ pasi_inter$miss5[i] <- rbinom(1, 1, 0.95)}
+} 
+
+for (i in 1:nrow(pasi_inter)){
+  if (pasi_inter$miss4[i] == 0){
+    pasi_inter$miss6[i] = 0
+  } else if (pasi_inter$`VISIT 5`[i] < 10){
+    pasi_inter$miss6[i] <- rbinom(1, 1, 0.7)
+  } else{ pasi_inter$miss6[i] <- rbinom(1, 1, 0.95)}
+}
+
+pasi6_mar <- pasi6
+pasi6_mar$PCHGCA1N[which(pasi_inter$miss6 == 0)] <- NA # PCHGCA1N contains visit 6 results with missing values
+pasi6_mar$im6 <- pasi_inter$miss6 # im6 contains the imputed visit 6 results
+
+dat_mar <- merge(adsl, pasi6_mar, by = "SUBJID")
+```
+
+```{r}
+# logistic regression on PASI75 with missing values excluded
+summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat_mar, family = binomial))
+
+# logistic regression on PASI75 with missing data imputed as 0
+summary(glm(im6 ~ SEX + as.factor(TRTPN), data = dat_mar, family = binomial))
+```
+
+## MNAR
+
+
+
+
+
+
+
+
+
+
+
+
