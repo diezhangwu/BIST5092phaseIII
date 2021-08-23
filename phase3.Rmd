@@ -116,13 +116,17 @@ for (i in 1:nrow(pasi_inter)){
   } else{ pasi_inter$miss6[i] <- rbinom(1, 1, 0.95)}
 }
 
+# check percent of missing data at visit 6
+1 - sum(pasi_inter$miss6)/nrow(pasi_inter) # about 17% missingness
+
+# generate missingness in the pasi6 data according to the missigness pattern obtained in the previous step
 pasi6_mar <- pasi6
 pasi6_mar$PCHGCA1N[which(pasi_inter$miss6 == 0)] <- NA # PCHGCA1N contains visit 6 results with missing values
-pasi6_mar$im6 <- pasi_inter$miss6 # im6 contains the imputed visit 6 results
+pasi6_mar$im6 <- pasi6_mar$PCHGCA1N
+pasi6_mar$im6[which(is.na(pasi6_mar$PCHGCA1N))] <- 0 # impute all missing data as non-responders
 
 dat_mar <- merge(adsl, pasi6_mar, by = "SUBJID")
 ```
-
 
 ```{r}
 # logistic regression on PASI75 with missing values excluded
@@ -176,15 +180,20 @@ for (i in 1:nrow(aemissing)){aemissing$misslog[i] <- rbinom(1, 1, 1 - aemissing$
 
 aemissing$SUBJID <- as.numeric(substr(aemissing$USUBJID, nchar(aemissing$USUBJID) - 4 + 1, nchar(aemissing$USUBJID)))
 
+# check the percent of missingness
+1 - sum(aemissing$miss)/nrow(pasi6) # about 43% of visit 6 measurements are missing
+
 # join the aemissing table to pasi6 and set visit6 results to be missing based on results from the previous step (1 = not missing, 0 = missing)
-dat_mnar <- left_join(pasi6, aemissing, by = "SUBJID")
-dat_mnar$PCHGCA1N[which(dat_mnar$miss == 0)] <- NA
-dat_mnar$im6 <- dat_mnar$PCHGCA1N
-dat_mnar$im6[which(is.na(dat_mnar$PCHGCA1N))] <- 0
-dat_mnar <- merge(dat_mnar, adsl, by = "SUBJID")
+pasi6_mnar <- left_join(pasi6, aemissing, by = "SUBJID")
+pasi6_mnar$PCHGCA1N[which(pasi6_mnar$miss == 0)] <- NA
+pasi6_mnar$im6 <- pasi6_mnar$PCHGCA1N
+pasi6_mnar$im6[which(is.na(pasi6_mnar$PCHGCA1N))] <- 0
+dat_mnar <- merge(pasi6_mnar, adsl, by = "SUBJID")
 
 # perform logistic regression on pasi75 with incomplete dataset and imputed dataset
 summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat_mnar, family = binomial))
 summary(glm(im6 ~ SEX + as.factor(TRTPN), data = dat_mnar, family = binomial))
 ```
+
+
 
