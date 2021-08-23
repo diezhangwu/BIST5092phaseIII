@@ -1,18 +1,21 @@
 ---
 title: "BIST 5092 Phase III Project"
-output: html_notebook
+output: pdf_document
+author: Diezhang Wu
 ---
 ```{r}
 library(dplyr)
 library(tidyr)
+library(stringr)
 ```
 
 ### import ADPA and ADSL datasets, select measurements at visit 6
 ```{r}
 adpa <- read.csv("../data_phase 3/ADPA.csv")
+pasi <- adpa %>% filter(PARAMCD == "PASI")
 pasi6 <- adpa %>% filter(PARAMCD == "PASI", AVISIT == "VISIT 6")
-adsl <- read.csv("../data_phase 3/ADsl.csv")
-adae <- read_csv("../data_phase 3/ADAE.csv")
+adsl <- read.csv("../data_phase 3/ADSL.csv")
+adae <- read.csv("../data_phase 3/ADAE.csv")
 ```
 
 ### perform logistic regression to assess the treatment effect on PASI75 adjusted by sex with the full dataset
@@ -120,6 +123,7 @@ pasi6_mar$im6 <- pasi_inter$miss6 # im6 contains the imputed visit 6 results
 dat_mar <- merge(adsl, pasi6_mar, by = "SUBJID")
 ```
 
+
 ```{r}
 # logistic regression on PASI75 with missing values excluded
 summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat_mar, family = binomial))
@@ -129,15 +133,58 @@ summary(glm(im6 ~ SEX + as.factor(TRTPN), data = dat_mar, family = binomial))
 ```
 
 ## MNAR
+```{r}
+# sum the duration of each adverse event to generate total days of adverse event the patient had during the trial
+adae$duration <- adae$AEENDY - adae$AESTDY
+#adduration <- adae %>% group_by(USUBJID) %>% summarise(duration = sum(duration))
 
+# create severity score for each patient with AE using AESER, AESEV, and AEREL
+# AESER_rate = 1 for Y, AESEV_rate : 1 for mild, 2 for moderate, 3 for severe, AEREL_rate = 1 for Y
+adae$AESER_rate <- ifelse(adae$AESER == "Y", 1, 0)
+adae$AESEV_rate <- ifelse(adae$AESEV == "MILD", 1, ifelse(adae$AESEV == "MODERATE", 2, 3))
+adae$AEREL_rate <- ifelse(adae$AEREL == "Y", 1, 0)
 
+# severity score score per event = AEREL_rate * 5 + AESER_rate * 3 + AESEV_rate * 2
+adae$serscore <- adae$AEREL_rate * 5 + adae$AESER_rate * 3 + adae$AESEV_rate * 2
 
+# toxic score = severity score * duration
+adae$toxscore <- adae$serscore * adae$duration 
 
+# compute toxicity scale for each subject by sum the toxic score from each adverse event
+toxscale <- adae %>% group_by(USUBJID) %>% summarise(toxscore = sum(toxscore))
+# check the distribution of the toxic scale
+summary(toxscale$toxscore)
+hist(toxscale$toxscore)
 
+hist(log(toxscale$toxscore))
 
+# assume the probability of dropping out is positively related to the toxicity scale and has an uniform distribution
+# the probability then can be simply determined by dividing the toxicity score with a common denominator
+toxscale$prob <- toxscale$toxscore/2000
+summary(toxscale$prob)
+hist(toxscale$prob)
 
+toxscale$problog <- log(toxscale$toxscore)/10
+summary(toxscale$problog)
+hist(toxscale$problog)
 
+# impute the missingness of the subjects with adverse events with their probability of dropping out
+aemissing <- toxscale
+set.seed(10)
+for (i in 1:nrow(aemissing)){aemissing$miss[i] <- rbinom(1, 1, 1 - aemissing$prob[i])}
+for (i in 1:nrow(aemissing)){aemissing$misslog[i] <- rbinom(1, 1, 1 - aemissing$problog[i])}
 
+aemissing$SUBJID <- as.numeric(substr(aemissing$USUBJID, nchar(aemissing$USUBJID) - 4 + 1, nchar(aemissing$USUBJID)))
 
+# join the aemissing table to pasi6 and set visit6 results to be missing based on results from the previous step (1 = not missing, 0 = missing)
+dat_mnar <- left_join(pasi6, aemissing, by = "SUBJID")
+dat_mnar$PCHGCA1N[which(dat_mnar$miss == 0)] <- NA
+dat_mnar$im6 <- dat_mnar$PCHGCA1N
+dat_mnar$im6[which(is.na(dat_mnar$PCHGCA1N))] <- 0
+dat_mnar <- merge(dat_mnar, adsl, by = "SUBJID")
 
+# perform logistic regression on pasi75 with incomplete dataset and imputed dataset
+summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat_mnar, family = binomial))
+summary(glm(im6 ~ SEX + as.factor(TRTPN), data = dat_mnar, family = binomial))
+```
 
