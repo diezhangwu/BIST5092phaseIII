@@ -7,6 +7,7 @@ author: Diezhang Wu
 library(dplyr)
 library(tidyr)
 library(stringr)
+library(ggplot2)
 ```
 
 ### import ADPA and ADSL datasets, select measurements at visit 6
@@ -157,35 +158,37 @@ adae$toxscore <- adae$serscore * adae$duration
 # compute toxicity scale for each subject by sum the toxic score from each adverse event
 toxscale <- adae %>% group_by(USUBJID) %>% summarise(toxscore = sum(toxscore))
 # check the distribution of the toxic scale
-summary(toxscale$toxscore)
-hist(toxscale$toxscore)
-
-hist(log(toxscale$toxscore))
+# hist(toxscale$toxscore)
+toxscale$logscore <- log(toxscale$toxscore)
+toxscale %>% ggplot(aes(x = logscore)) + 
+  geom_histogram(color="black", fill="darkblue", linetype = "dashed") +
+  labs(title = "Distribution of log toxicity score", x = "Log(Score)", y = "Count")
 
 # assume the probability of dropping out is positively related to the toxicity scale and has an uniform distribution
 # the probability then can be simply determined by dividing the toxicity score with a common denominator
-toxscale$prob <- toxscale$toxscore/2000
-summary(toxscale$prob)
-hist(toxscale$prob)
-
-toxscale$problog <- log(toxscale$toxscore)/10
-summary(toxscale$problog)
-hist(toxscale$problog)
+toxscale <- toxscale[which(toxscale$logscore != -Inf),]
+mu <- mean(toxscale$logscore)
+sigma <- sd(toxscale$logscore) + 1
+toxscale$problog2 <- pnorm(toxscale$logscore, mu, sigma)
 
 # impute the missingness of the subjects with adverse events with their probability of dropping out
 aemissing <- toxscale
-set.seed(10)
-for (i in 1:nrow(aemissing)){aemissing$miss[i] <- rbinom(1, 1, 1 - aemissing$prob[i])}
-for (i in 1:nrow(aemissing)){aemissing$misslog[i] <- rbinom(1, 1, 1 - aemissing$problog[i])}
+set.seed(1234)
+for (i in 1:nrow(aemissing)){aemissing$misslog2[i] <- rbinom(1, 1, 1 - aemissing$problog2[i])}
+# check the probability distribution 
+toxscale %>% ggplot(aes(x = problog2)) + 
+  geom_histogram(color="black", fill="darkblue", linetype = "dashed") +
+  labs(title = "Distribution of the dropping out probability", x = "Probability", y = "Count")
 
 aemissing$SUBJID <- as.numeric(substr(aemissing$USUBJID, nchar(aemissing$USUBJID) - 4 + 1, nchar(aemissing$USUBJID)))
 
 # check the percent of missingness
-1 - sum(aemissing$miss)/nrow(pasi6) # about 43% of visit 6 measurements are missing
+# table(aemissing$misslog2) # 33% missing values
+# 605 / nrow(pasi6)
 
 # join the aemissing table to pasi6 and set visit6 results to be missing based on results from the previous step (1 = not missing, 0 = missing)
 pasi6_mnar <- left_join(pasi6, aemissing, by = "SUBJID")
-pasi6_mnar$PCHGCA1N[which(pasi6_mnar$miss == 0)] <- NA
+pasi6_mnar$PCHGCA1N[which(pasi6_mnar$misslog2 == 0)] <- NA
 pasi6_mnar$im6 <- pasi6_mnar$PCHGCA1N
 pasi6_mnar$im6[which(is.na(pasi6_mnar$PCHGCA1N))] <- 0
 dat_mnar <- merge(pasi6_mnar, adsl, by = "SUBJID")
@@ -194,6 +197,3 @@ dat_mnar <- merge(pasi6_mnar, adsl, by = "SUBJID")
 summary(glm(PCHGCA1N ~ SEX + as.factor(TRTPN), data = dat_mnar, family = binomial))
 summary(glm(im6 ~ SEX + as.factor(TRTPN), data = dat_mnar, family = binomial))
 ```
-
-
-
